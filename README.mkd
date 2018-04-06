@@ -1,0 +1,4 @@
+# dep
+
+Python module for caching the results of functions on disk and/or in memory and
+reusing them as-needed instead of recomputing them all the time.
