@@ -98,6 +98,8 @@ def template_task(inputs, output, flags=()):
   """
   A decorator similar to task, but it generates targets by replacing named
   formatting groups within input/output strings with appropriate matches.
+
+  The function will be called with a match object as its first argument.
   """
   if not isinstance(inputs, (list, tuple)):
     raise ValueError(

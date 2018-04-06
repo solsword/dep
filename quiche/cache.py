@@ -9,12 +9,48 @@ import os
 import sys
 import time
 import pickle
+import base64
+import string
+
+SLUG_CHARS = (
+  string.ascii_lowercase
++ string.ascii_uppercase
++ string.digits
+)
+
+def slug(name):
+  result = ""
+  running = False
+  for c in name:
+    if c in SLUG_CHARS:
+      if running:
+        result += '-'
+      result += c
+      running = False
+    else:
+      running = True
+  if running:
+    result += '-'
+
+  return result
+
+def safe_filename(name):
+  """
+  Encodes the given target name safely as a filesystem name.
+  """
+  return slug(name) + '_' + base64.urlsafe_b64encode(name)
+
+def file_basename(cache_dir, target_name):
+  """
+  Converts a target name to the name of the file it'll be stored under.
+  """
+  return os.path.join(cache_dir, safe_filename(target_name))
 
 def save_model(cache_dir, model, model_name):
   """
   Saves the given model to disk for retrieval using load_model.
   """
-  model.save(os.path.join(cache_dir, model_name) + ".h5")
+  model.save(file_basename(cache_dir, model_name) + ".h5")
 
 def load_model(cache_dir, model_name):
   """
@@ -22,7 +58,7 @@ def load_model(cache_dir, model_name):
   exist. Returns a (timestamp, value) pair.
   """
   import keras
-  fn = os.path.join(cache_dir, model_name) + ".h5"
+  fn = file_basename(cache_dir, model_name) + ".h5"
   if os.path.exists(fn):
     ts = os.path.getmtime(fn)
     return (ts, keras.models.load_model(fn))
@@ -39,7 +75,7 @@ def save_object(cache_dir, obj, name):
   """
   Uses pickle to save the given object to a file.
   """
-  fn = os.path.join(cache_dir, name) + ".pkl"
+  fn = file_basename(cache_dir, name) + ".pkl"
   with open(fn, 'wb') as fout:
     pickle.dump(obj, fout)
 
@@ -48,7 +84,7 @@ def load_object(cache_dir, name):
   Uses pickle to load the given object from a file. If the file doesn't exist,
   raises a ValueError. Returns a (timestamp, value) pair.
   """
-  fn = os.path.join(cache_dir, name) + ".pkl"
+  fn = file_basename(cache_dir, name) + ".pkl"
   if os.path.exists(fn):
     ts = os.path.getmtime(fn)
     with open(fn, 'rb') as fin:
@@ -91,11 +127,12 @@ def check_time(cache_dir, name):
   Returns just the modification time for the given object (tries pickle first
   and then h5). Returns None if the file does not exist.
   """
-  fn = os.path.join(cache_dir, name) + ".pkl"
+  bfn = file_basename(cache_dir, name)
+  fn = bfn + ".pkl"
   if os.path.exists(fn):
     return os.path.getmtime(fn)
   else:
-    fn = os.path.join(cache_dir, name) + ".h5"
+    fn = bfn + ".h5"
     if os.path.exists(fn):
       return os.path.getmtime(fn)
     else:
