@@ -16,6 +16,7 @@ import os
 import time
 import regex as re # for same-name group overwriting
 import collections
+import traceback
 
 from . import cache
 
@@ -97,7 +98,8 @@ def task(inputs, output, flags=()):
 def template_task(inputs, output, flags=()):
   """
   A decorator similar to task, but it generates targets by replacing named
-  formatting groups within input/output strings with appropriate matches.
+  formatting groups within input/output strings with appropriate matches. Note
+  that the formatting groups which are used to specify inputs must be named.
 
   The function will be called with a match object as its first argument.
   """
@@ -130,8 +132,8 @@ def template_task(inputs, output, flags=()):
     keygroups = { k:  r"(?<" + k + r">.+)" for k in keyslots }
 
     tre = re.escape(output.format(*plainrep, **keyrep))
-    for i in range(plainslots):
-      tre = tre.replace(digits[i//4] + digits[i%4], r"(.+)")
+    for pr in plainrep:
+      tre = tre.replace(pr, r"(.+)")
     for k in keyrep:
       tre = tre.replace(keyrep[k], keygroups[k])
 
@@ -139,7 +141,10 @@ def template_task(inputs, output, flags=()):
       inputs, function, flags = stuff
 
       gd = name_match.groupdict()
-      inputs = [ inp.format(**gd) for inp in inputs ]
+      try:
+        inputs = [ inp.format(**gd) for inp in inputs ]
+      except IndexError:
+        raise ValueError("Task template inputs may not include unnamed groups!")
       def wrapped(*args, **kwargs):
         nonlocal function, name_match
         return function(name_match, *args, **kwargs)
@@ -278,6 +283,78 @@ def find_target(target):
 
   # Not a known target and no generator matches:
   raise ValueError("Unknown target '{}'.".format(target))
+
+def indent(report):
+  """
+  Adds one layer of indentation to the given report.
+  """
+  return "  " + "\n  ".join(report.split("\n")[:-1]) + "\n"
+
+def find_target_report(target, show_tracebacks=False):
+  """
+  Searches for the given target, storing and returning a log of targets
+  attempted. Useful for debugging missing targets.
+
+  Setting show_tracebacks to True enables reporting tracebacks for rule
+  generation failures.
+  """
+  report = ""
+  while target in TARGET_ALIASES:
+    report += "alias '{}' → '{}'\n".format(target, TARGET_ALIASES[target])
+    target = TARGET_ALIASES[target]
+  if target in KNOWN_TARGETS:
+    report += "found known target '{}'\n".format(target)
+    # known target: return our report
+    return report
+  else:
+    report += "unknown target '{}'; searching rule templates\n".format(target)
+    # try to find a generator that can handle it?
+    for tre in TARGET_GENERATORS:
+      m = re.match(tre, target)
+      if m:
+        report += "matched expression '{}'\n".format(tre)
+        gen, stuff = TARGET_GENERATORS[tre]
+        try:
+          success = gen(m, stuff)
+          report += "generated rule with dependencies:\n  {}\n".format(
+            ",\n  ".join("'{}'".format(d) for d in success[0])
+          )
+          return report
+        except Exception as e:
+          tb = traceback.format_exc()
+          report += "rule generation failed for: '{}'\n".format(tre)
+          report += indent(tb)
+      else:
+        report += "didn't match expression '{}'\n".format(tre)
+
+  report += "no matching rules for '{}'\n".format(target)
+  return report
+
+def recursive_target_report(target, above=None):
+  """
+  Creates and returns a report detailing all of the recursive dependencies of
+  the given target. Detects and reports circular dependencies.
+  """
+  report = ""
+  above = above or set()
+  above = set(above)
+  above.add(target)
+  try:
+    deps, fcn, flags = find_target(target)
+    if deps:
+      report += "'{}' depends on:\n".format(target)
+      for d in deps:
+        if d in above:
+          report += "  '{}', which is a circular dependency!\n".format(d)
+        else:
+          subreport = recursive_target_report(d, above)
+          report += indent(subreport)
+    else:
+      report += "'{}'\n".format(target)
+  except ValueError:
+    report += "'{}' (could not be resolved)\n".format(target)
+
+  return report
 
 def check_up_to_date(target):
   """
