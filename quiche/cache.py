@@ -18,6 +18,8 @@ SLUG_CHARS = (
 + string.digits
 )
 
+FILENAME_ENCODING = "utf-8"
+
 def slug(name):
   result = ""
   running = False
@@ -38,7 +40,9 @@ def safe_filename(name):
   """
   Encodes the given target name safely as a filesystem name.
   """
-  return slug(name) + '_' + base64.urlsafe_b64encode(name)
+  return slug(name) + '_' + base64.urlsafe_b64encode(
+    bytes(name, encoding=FILENAME_ENCODING)
+  ).decode(encoding=FILENAME_ENCODING)
 
 def file_basename(cache_dir, target_name):
   """

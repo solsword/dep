@@ -7,7 +7,7 @@ with open("README.mkd") as fin:
 
 setup(
   name="quiche",
-  version="0.2.2",
+  version="0.2.3",
   url="https://github.com/solsword/quiche",
   description="Make-like system for caching Python function results. Compatible with keras.",
   author="Peter Mawhorter",
