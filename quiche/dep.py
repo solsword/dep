@@ -389,7 +389,7 @@ def create(target):
   ts, val = get_cached(target)
 
   # Double-check that we got a value:
-  if val == NotAvailable:
+  if val is NotAvailable:
     raise ValueError("Failed to create target '{}'.".format(target))
 
   return (ts, val)

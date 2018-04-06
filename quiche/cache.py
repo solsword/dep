@@ -81,7 +81,10 @@ def save_object(cache_dir, obj, name):
   """
   fn = file_basename(cache_dir, name) + ".pkl"
   with open(fn, 'wb') as fout:
-    pickle.dump(obj, fout)
+    try:
+      pickle.dump(obj, fout)
+    except:
+      raise ValueError("Failed to pickle result for: '{}'".format(name))
 
 def load_object(cache_dir, name):
   """
