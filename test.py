@@ -1,15 +1,5 @@
-# quiche
+#!/usr/bin/env python3
 
-Python module for caching the results of functions on disk and/or in memory and
-reusing them as-needed instead of recomputing them all the time.
-
-```sh
-pip install quiche 
-```
-
-should work, after which:
-
-```python
 from quiche import dep
 
 @dep.task((), "base")
@@ -26,10 +16,3 @@ def times_two(val):
 
 ts, val = dep.create("times_two")
 print("(7 + 1) * 2 is", val)
-```
-
-should print:
-
-```
-(7 + 1) * 2 is 16
-```

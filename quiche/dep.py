@@ -8,6 +8,8 @@ Python make-like object building/caching system. Example usage:
   def function_that_produces_product(dep1, dep2):
     ...
     return product
+
+Results are cached on-disk in CACHE_DIR.
 """
 
 import os
@@ -23,7 +25,7 @@ TARGET_GENERATORS = collections.OrderedDict()
 
 CACHED_VALUES = {}
 
-CACHE_DIR = ".dep_cache"
+CACHE_DIR = ".quiche_products"
 
 DC1 = '\u0010'
 DC2 = '\u0011'
