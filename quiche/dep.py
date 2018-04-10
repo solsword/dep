@@ -393,3 +393,22 @@ def create(target):
     raise ValueError("Failed to create target '{}'.".format(target))
 
   return (ts, val)
+
+def create_brave(target):
+  """
+  Creates the desired target, using the cache without question if a cached
+  value is available. Only use this when you're fine with an out-of-date cached
+  value.
+  """
+
+  # Reach for a cached value *without* checking freshness:
+  ts, val = get_cached(target)
+
+  if val is NotAvailable: # Fine, we'll do a full dependency check
+    ts, val = create(target)
+
+  # If that failed, we're out of luck
+  if val is NotAvailable:
+    raise ValueError("Failed to create target '{}'.".format(target))
+
+  return (ts, val)
