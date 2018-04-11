@@ -15,12 +15,12 @@ set_cache_file.
 
 import os
 import time
+import pickle
 import regex as re # for same-name group overwriting
 import collections
 import traceback
 
 from . import cache
-from . import names
 
 TARGET_ALIASES = {}
 KNOWN_TARGETS = {}
@@ -91,12 +91,11 @@ def base(value=1):
 def mult(base, times=1):
   return base * times
 
-print(
-  "{} == {}".format(
-    dep.create("product", {"value": 3, "times": 5})[1],
-    15
-  )
-)
+p1 = dep.create("product", {"value": 3, "times": 5})[1]
+p2 = dep.create("product", {"value": 5, "times": 6})[1]
+
+print("{} == {}".format(p1, 15))
+print("{} == {}".format(p2, 30))
   ```
   """
   if not isinstance(inputs, (list, tuple)):
@@ -246,8 +245,11 @@ def params__bytes(pnames, params):
   Returns a unique byte string for the values of each of the given parameter
   names within the given parameters dictionary.
   """
-  obj = ((pn, params[pn]) for pn in pnames)
-  return pickle.dumps(obj)
+  obj = tuple((pn, params.get(pn, None)) for pn in pnames)
+  try:
+    return pickle.dumps(obj)
+  except:
+    raise ValueError("Parameter object is not picklable:\n{}".format(obj))
 
 def bytes__params(pbytes):
   """
@@ -262,7 +264,10 @@ def mix_target(target, relevant, params):
   Creates a full target name out of a base target name, a list of relevant
   parameters, and a parameter values dictionary.
   """
-  return target + ':' + params__bytes(relevant, params).decode()
+  return target + ':' + params__bytes(relevant, params).decode(
+    "utf-8",
+    errors="replace"
+  )
 
 def get_cache_time(target, pnames=(), params={}):
   """
@@ -453,10 +458,15 @@ def check_up_to_date(target, params={}, knockout=()):
     myts = get_cache_time(target, all_relevant, params)
   if myts is None or any(ts > myts for ts in times):
     # Compute and cache a new value:
-    ivalues = [ get_cached(inp, all_relevant, params)[1] for inp in inputs ]
+    ivalues = []
+    for relevant, inp in zip(subparams, inputs):
+      ts, val = get_cached(inp, relevant, params)
+      if val is NotAvailable:
+        raise ValueError("Couldn't create dependency '{}'.".format(inp))
+      ivalues.append(val)
     pvalues = { pn: params.get(pn, None) for pn in pnames }
     value = function(*ivalues, **pvalues)
-    return cache_value(target, pnames, params, value, flags)
+    return cache_value(target, all_relevant, params, value, flags)
   else:
     # Just return time cached:
     return myts

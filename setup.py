@@ -2,7 +2,7 @@ from distutils.core import setup
 
 import m2r
 
-with open("README.mkd") as fin:
+with open("README") as fin:
   long_desc = m2r.convert(fin.read())
 
 setup(

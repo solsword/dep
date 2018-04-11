@@ -11,36 +11,11 @@ import time
 import shelve
 import tempfile
 
-from . import names
-
 def now():
   """
   Get the current timestamp.
   """
   return time.time()
-
-def unique_name(cache_file, obj):
-  """
-  Returns a unique name for the given object, registering that name in the
-  given cache file.
-  """
-  with shelve.open(cache_file) as shelf:
-    uname = "name:" + names.name(hash(obj))
-    if uname in shelf:
-      shelved = shelf[uname]
-      i = 0
-      while shelved != obj:
-        i += 1
-        uname = "{}-{}".format(uname, i)
-        if uname in shelf:
-          shelved = shelf[uname]
-        else:
-          shelf[uname] = obj
-          shelved = obj
-    else:
-      shelf[uname] = obj
-
-    return uname
 
 def save_model(cache_file, model, model_name):
   """
