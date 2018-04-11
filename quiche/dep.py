@@ -4,12 +4,13 @@ dep.py
 Python make-like object building/caching system. Example usage:
 
 
-  @dep.task(("dependency-name-1", "dependency-name-2"), "product-name")
-  def function_that_produces_product(dep1, dep2):
+  @dep.task(["dependency-1", "dependency-2"], ["param_1"], "product-name")
+  def function_that_produces_product(dep1, dep2, param_1=None):
     ...
     return product
 
-Results are cached on-disk in CACHE_DIR.
+Results are cached on-disk in CACHE_FILE, which can be changed using
+set_cache_file.
 """
 
 import os
@@ -19,6 +20,7 @@ import collections
 import traceback
 
 from . import cache
+from . import names
 
 TARGET_ALIASES = {}
 KNOWN_TARGETS = {}
@@ -26,25 +28,18 @@ TARGET_GENERATORS = collections.OrderedDict()
 
 CACHED_VALUES = {}
 
-CACHE_DIR = ".quiche_products"
+CACHE_FILE = ".quiche"
 
 DC1 = '\u0010'
 DC2 = '\u0011'
 DC3 = '\u0012'
 DC4 = '\u0013'
 
-def set_cache_dir(dr):
+def set_cache_file(fn):
   """
-  Sets the cache directory. Doesn't delete the old one (do that manually).
+  Sets the cache file. Doesn't delete the old one (do that manually).
   """
-  CACHE_DIR = dr
-  try:
-    os.mkdir(CACHE_DIR)
-  except FileExistsError:
-    pass
-
-# Create the cache dir on import if needed:
-set_cache_dir(CACHE_DIR)
+  CACHE_FILE = fn
 
 def add_alias(alias, target):
   """
@@ -66,8 +61,8 @@ def add_object(obj, target, flags=()):
   def offer():
     nonlocal obj
     return obj
-  cache_value(target, obj, flags)
-  KNOWN_TARGETS[target] = ((), offer, flags)
+  cache_value(target, (), {}, obj, flags)
+  KNOWN_TARGETS[target] = ((), (), offer, flags)
 
 def add_gather(inputs, output, flags=()):
   """
@@ -76,39 +71,70 @@ def add_gather(inputs, output, flags=()):
   global KNOWN_TARGETS
   def gather(*inputs):
     return inputs
-  KNOWN_TARGETS[output] = (inputs, gather, flags)
+  KNOWN_TARGETS[output] = (inputs, (), gather, flags)
 
-def task(inputs, output, flags=()):
+def task(inputs, params, output, flags=()):
   """
   A decorator for defining a task. Registers the decorated function as the
-  mechanism for producing the declared target using the given inputs.
+  mechanism for producing the declared target using the given inputs (given as
+  *args) and parameters (given as **kwargs). Parameters not given by the user
+  when creating an object will default to None. An example:
+
+  ```
+from quiche import dep
+
+@dep.task([], ["value"], "base")
+def base(value=1):
+  return value
+
+@dep.task(["base"], ["times"], "product")
+def mult(base, times=1):
+  return base * times
+
+print(
+  "{} == {}".format(
+    dep.create("product", {"value": 3, "times": 5})[1],
+    15
+  )
+)
+  ```
   """
   if not isinstance(inputs, (list, tuple)):
     raise ValueError(
       "task inputs must be a list or tuple. Did you forget a comma?"
     )
+  if not isinstance(inputs, (list, tuple)):
+    raise ValueError(
+      "task params must be a list or tuple. Did you forget a comma?"
+    )
   if not isinstance(output, str):
     raise ValueError("task output must be a string.")
   def decorate(function):
     global KNOWN_TARGETS
-    KNOWN_TARGETS[output] = (inputs, function, flags)
+    KNOWN_TARGETS[output] = (inputs, params, function, flags)
     return function
   return decorate
 
-def template_task(inputs, output, flags=()):
+def template_task(inputs, params, output, flags=()):
   """
   A decorator similar to task, but it generates targets by replacing named
-  formatting groups within input/output strings with appropriate matches. Note
-  that the formatting groups which are used to specify inputs must be named.
+  formatting groups within input/param/output strings with appropriate matches.
+  Note that the formatting groups which are used to specify inputs or params
+  must be named.
 
-  The function will be called with a match object as its first argument.
+  The function will be called with an re.match object as its first argument.
   """
   if not isinstance(inputs, (list, tuple)):
     raise ValueError(
       "template_task inputs must be a list or tuple. Did you forget a comma?"
     )
+  if not isinstance(params, (list, tuple)):
+    raise ValueError(
+      "template_task params must be a list or tuple. Did you forget a comma?"
+    )
   if not isinstance(output, str):
     raise ValueError("template_task output must be a string.")
+
   def decorate(function):
     global TARGET_GENERATORS
 
@@ -138,27 +164,31 @@ def template_task(inputs, output, flags=()):
       tre = tre.replace(keyrep[k], keygroups[k])
 
     def gen_target(name_match, stuff):
-      inputs, function, flags = stuff
+      inputs, params, function, flags = stuff
 
       gd = name_match.groupdict()
       try:
         inputs = [ inp.format(**gd) for inp in inputs ]
       except IndexError:
         raise ValueError("Task template inputs may not include unnamed groups!")
+      try:
+        params = [ param.format(**gd) for param in params ]
+      except IndexError:
+        raise ValueError("Task template params may not include unnamed groups!")
       def wrapped(*args, **kwargs):
         nonlocal function, name_match
         return function(name_match, *args, **kwargs)
       wrapped.__name__ = function.__name__
-      return inputs, wrapped, flags
+      return inputs, params, wrapped, flags
 
-    TARGET_GENERATORS[tre] = (gen_target, (inputs, function, flags))
+    TARGET_GENERATORS[tre] = (gen_target, (inputs, params, function, flags))
     return function
   return decorate
 
-def iter_task(inputs, output, flags=()):
+def iter_task(inputs, params, output, flags=()):
   """
   A decorator similar to task, but it generates targets by replacing {iter} and
-  {next} within input/output strings with subsequent natural numbers.
+  {next} within input/param/output strings with subsequent natural numbers.
   """
   if not isinstance(inputs, (list, tuple)):
     raise ValueError(
@@ -174,7 +204,7 @@ def iter_task(inputs, output, flags=()):
     tre = tre.replace(DC2, r"(?P<next>[0-9]+)")
 
     def gen_target(name_match, stuff):
-      inputs, function, flags = stuff
+      inputs, params, function, flags = stuff
 
       try:
         ival = int(name_match.group("iter"))
@@ -197,47 +227,74 @@ def iter_task(inputs, output, flags=()):
         nval = 0
 
       inputs = [ inp.format(iter=ival, next=nval) for inp in inputs ]
+      params = [ param.format(iter=ival, next=nval) for param in params ]
       def wrapped(*args, **kwargs):
         nonlocal function, nval
         return function(nval, *args, **kwargs)
       wrapped.__name__ = function.__name__
-      return inputs, wrapped, flags
+      return inputs, params, wrapped, flags
 
-    TARGET_GENERATORS[tre] = (gen_target, (inputs, function, flags))
+    TARGET_GENERATORS[tre] = (gen_target, (inputs, params, function, flags))
     return function
   return decorate
 
 class NotAvailable:
   pass
 
-def get_cache_time(target):
+def params__bytes(pnames, params):
+  """
+  Returns a unique byte string for the values of each of the given parameter
+  names within the given parameters dictionary.
+  """
+  obj = ((pn, params[pn]) for pn in pnames)
+  return pickle.dumps(obj)
+
+def bytes__params(pbytes):
+  """
+  Converts a parameters byte string back into a parameters dictionary. Only the
+  selected names will be present, of course.
+  """
+  obj = pickle.loads(pbytes)
+  return { x[0]: x[1] for x in obj }
+
+def mix_target(target, relevant, params):
+  """
+  Creates a full target name out of a base target name, a list of relevant
+  parameters, and a parameter values dictionary.
+  """
+  return target + ':' + params__bytes(relevant, params).decode()
+
+def get_cache_time(target, pnames=(), params={}):
   """
   Gets the cache time of the given target. Returns None if the target isn't
   cached anywhere.
   """
-  if target in CACHED_VALUES:
-    return CACHED_VALUES[target][0]
+  full_target = mix_target(target, pnames, params)
+  if full_target in CACHED_VALUES:
+    return CACHED_VALUES[full_target][0]
   else:
-    return cache.check_time(CACHE_DIR, target)
+    return cache.check_time(CACHE_FILE, full_target)
 
-def get_cached(target):
+def get_cached(target, pnames=(), params={}):
   """
-  Fetches a cached object for the given target, or returns a special
-  NotAvailable result. Returns a (timestamp, value) pair, with None as the time
-  if the object isn't available.
+  Fetches a cached object for the given target (which uses the named parameters
+  from the given parameters dictionary), or returns a special NotAvailable
+  result. Returns a (timestamp, value) pair, with None as the time if the
+  object isn't available.
   """
-  if target in CACHED_VALUES:
+  full_target = mix_target(target, pnames, params)
+  if full_target in CACHED_VALUES:
     # in memory
-    return CACHED_VALUES[target]
+    return CACHED_VALUES[full_target]
   else:
     try:
       # on disk
-      return cache.load_any(CACHE_DIR, target)
+      return cache.load_any(CACHE_FILE, full_target)
     except:
       # must create
       return None, NotAvailable
 
-def cache_value(target, value, flags):
+def cache_value(target, pnames, params, value, flags):
   """
   Adds a value to the cache, also storing it to disk. Returns the timestamp of
   the newly-cached value. Flags affect caching as follows:
@@ -248,22 +305,23 @@ def cache_value(target, value, flags):
   Combining "ephemeral" and "volatile" will not work (in that case, just use a
   normal function to return the value, rather than a dependency).
   """
+  full_target = mix_target(target, pnames, params)
   if "ephemeral" not in flags: # Else don't save on disk
-    cache.save_any(CACHE_DIR, value, target)
+    cache.save_any(CACHE_FILE, value, full_target)
   ts = time.time()
   if "volatile" not in flags: # Else don't save in memory
-    CACHED_VALUES[target] = (ts, value)
+    CACHED_VALUES[full_target] = (ts, value)
   else:
     try:
-      del CACHED_VALUES[target]
+      del CACHED_VALUES[full_target]
     except:
       pass
   return ts
 
 def find_target(target):
   """
-  Retrieves information (inputs, processing function, and flags) for the given
-  target. Generates a target when necessary and possible.
+  Retrieves information (inputs, parameters, processing function, and flags)
+  for the given target. Generates a target when necessary and possible.
   """
   while target in TARGET_ALIASES:
     target = TARGET_ALIASES[target]
@@ -356,37 +414,70 @@ def recursive_target_report(target, above=None):
 
   return report
 
-def check_up_to_date(target):
+def gather_relevant_parameters(target):
+  """
+  Recursively gathers a sorted list of parameters relevant to the given target.
+  This includes parameters specified as inputs to that target and to any
+  (recursive) required sub-target(s).
+  """
+  inputs, relevant, function, flags = find_target(target)
+  rv = list(relevant)
+  for inp in inputs:
+    for param in gather_relevant_parameters(inp):
+      for i in range(len(rv)):
+        if param < rv[i]:
+          break
+      rv.insert(i, param)
+
+  return rv
+
+def check_up_to_date(target, params={}, knockout=()):
   """
   Returns a timestamp for the given target after checking that all of its
   (recursive) perquisites are up-to-date. If missing and/or out-of-date values
   are found, new values are generated.
+
+  If given, targets in the knockout list (or set) will be considered stale even
+  if timestamps indicate that they're up-to-date.
   """
-  inputs, function, flags = find_target(target)
+  inputs, pnames, function, flags = find_target(target)
 
-  times = [ check_up_to_date(inp) for inp in inputs ]
+  all_relevant = gather_relevant_parameters(target)
 
-  myts = get_cache_time(target)
+  times = [ check_up_to_date(inp, params, knockout) for inp in inputs ]
+  subparams = [ gather_relevant_parameters(inp) for inp in inputs ]
+
+  if target in knockout:
+    myts = None # explicit rebuild
+  else:
+    myts = get_cache_time(target, all_relevant, params)
   if myts is None or any(ts > myts for ts in times):
     # Compute and cache a new value:
-    ivalues = [ get_cached(inp)[1] for inp in inputs ]
-    value = function(*ivalues)
-    return cache_value(target, value, flags)
+    ivalues = [ get_cached(inp, all_relevant, params)[1] for inp in inputs ]
+    pvalues = { pn: params.get(pn, None) for pn in pnames }
+    value = function(*ivalues, **pvalues)
+    return cache_value(target, pnames, params, value, flags)
   else:
     # Just return time cached:
     return myts
 
-def create(target):
+def create(target, params={}, knockout=()):
   """
-  Creates the desired target, using cached values when appropriate. Returns a
-  (timestamp, value) pair indicating when the returned value was constructed.
-  Raises a ValueError if the target is invalid or can't be created.
+  Creates the desired target, using cached values when appropriate. Passes
+  parameters and the knockout list to check_up_to_date. Returns a (timestamp,
+  value) pair indicating when the returned value was constructed. Raises a
+  ValueError if the target is invalid or can't be created.
+
+  The given parameters (values should be small where possible; use targets to
+  embody bigger objects) are available to tasks, and the same target will be
+  cached differently for different params if it depends on them (even
+  recursively).
   """
   # Update dependencies as necessary (recursively)
-  check_up_to_date(target)
+  check_up_to_date(target, params, knockout)
 
   # Grab newly-cached value:
-  ts, val = get_cached(target)
+  ts, val = get_cached(target, gather_relevant_parameters(target), params)
 
   # Double-check that we got a value:
   if val is NotAvailable:
@@ -394,7 +485,7 @@ def create(target):
 
   return (ts, val)
 
-def create_brave(target):
+def create_brave(target, params={}, knockout=()):
   """
   Creates the desired target, using the cache without question if a cached
   value is available. Only use this when you're fine with an out-of-date cached
@@ -402,10 +493,10 @@ def create_brave(target):
   """
 
   # Reach for a cached value *without* checking freshness:
-  ts, val = get_cached(target)
+  ts, val = get_cached(target, gather_relevant_parameters(target), params)
 
   if val is NotAvailable: # Fine, we'll do a full dependency check
-    ts, val = create(target)
+    ts, val = create(target, params, knockout)
 
   # If that failed, we're out of luck
   if val is NotAvailable:

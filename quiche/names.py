@@ -5,6 +5,8 @@ Module for assigning easily-remembered names to arbitrary configurations.
 """
 
 import random
+random.seed(4317)
+from functools import reduce
 
 ANIMALS = [
   # marine
@@ -252,6 +254,7 @@ PRE_ADJECTIVES = [
   "dancing",
   "frolicking",
   "sliding",
+  "slithering",
   "hopping",
   "soaring",
   "gliding",
@@ -271,6 +274,18 @@ PRE_ADJECTIVES = [
   "nimble",
   "clumsy",
   "ponderous",
+  "audacious",
+  "loud",
+  "screaming",
+  "screeching",
+  "yelling",
+  "whistling",
+  "barking",
+  "singing",
+  "quiet",
+  "silent",
+  "whispering",
+  "susurrating",
 ]
 
 POST_ADJECTIVES = [
@@ -303,40 +318,61 @@ POST_ADJECTIVES = [
   "spotted",
   "ringed",
   "camouflaged",
+  "hairy",
+  "scaly",
+  "smooth",
+  "rough",
+  "armored",
+  "soft",
+  "puffy",
+  "damp",
+  "wet",
+  "dry",
+  "spiny",
+  "bumpy",
+  "leathery",
 ]
 
 random.shuffle(ANIMALS)
 random.shuffle(PRE_ADJECTIVES)
 random.shuffle(POST_ADJECTIVES)
 
-INDICES = list(
-  range(
-    len(PRE_ADJECTIVES)
-  * len(POST_ADJECTIVES)
-  * len(ANIMALS)
-  * len(ANIMALS)
-  )
-)
+def iter_increment(dimensions):
+  incr = 1
+  for i in range(1, len(dimensions)):
+    incr += reduce(lambda a,b : a*b, dimensions[i:], 1)
 
-# TODO: ANARCHY!
-random.shuffle(INDICES)
+  return incr
+
+def iter_index(n, increment, total_posibilities):
+  return (n * increment) % total_posibilities
 
 def pick(n, L):
   return L[n % len(L)]
 
-def name(i):
-  n = pick(i, INDICES)
-  i1 = n % len(PRE_ADJECTIVES)
-  n //= len(PRE_ADJECTIVES)
-  i2 = n % len(POST_ADJECTIVES)
-  n //= len(POST_ADJECTIVES)
-  i3 = n % len(ANIMALS)
-  n //= len(ANIMALS)
-  i4 = n % len(ANIMALS)
-  return "{}-{}-{}-{}".format(
-    PRE_ADJECTIVES[i1],
-    POST_ADJECTIVES[i2],
-    ANIMALS[i3],
-    ANIMALS[i4],
-  )
+DIMENSIONS = [
+  len(PRE_ADJECTIVES),
+  len(POST_ADJECTIVES),
+  len(ANIMALS),
+  len(ANIMALS)
+]
 
+INCREMENT = iter_increment(DIMENSIONS)
+
+TOTAL_POSSIBILITIES = reduce(lambda a,b: a*b, DIMENSIONS, 1)
+
+def name(i):
+  n = iter_index(i, INCREMENT, TOTAL_POSSIBILITIES)
+  i1 = (len(ANIMALS) - 17 - n) % len(ANIMALS)
+  n //= len(ANIMALS)
+  i2 = n % len(ANIMALS)
+  n //= len(ANIMALS)
+  i3 = n % len(POST_ADJECTIVES)
+  n //= len(POST_ADJECTIVES)
+  i4 = n % len(PRE_ADJECTIVES)
+  return "{}-{}-{}-{}".format(
+    PRE_ADJECTIVES[i4],
+    POST_ADJECTIVES[i3],
+    ANIMALS[i2],
+    ANIMALS[i1],
+  )

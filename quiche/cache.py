@@ -8,139 +8,144 @@ load/save Keras models.
 import os
 import sys
 import time
-import pickle
-import base64
-import string
+import shelve
+import tempfile
 
-SLUG_CHARS = (
-  string.ascii_lowercase
-+ string.ascii_uppercase
-+ string.digits
-)
+from . import names
 
-FILENAME_ENCODING = "utf-8"
+def now():
+  """
+  Get the current timestamp.
+  """
+  return time.time()
 
-def slug(name):
-  result = ""
-  running = False
-  for c in name:
-    if c in SLUG_CHARS:
-      if running:
-        result += '-'
-      result += c
-      running = False
+def unique_name(cache_file, obj):
+  """
+  Returns a unique name for the given object, registering that name in the
+  given cache file.
+  """
+  with shelve.open(cache_file) as shelf:
+    uname = "name:" + names.name(hash(obj))
+    if uname in shelf:
+      shelved = shelf[uname]
+      i = 0
+      while shelved != obj:
+        i += 1
+        uname = "{}-{}".format(uname, i)
+        if uname in shelf:
+          shelved = shelf[uname]
+        else:
+          shelf[uname] = obj
+          shelved = obj
     else:
-      running = True
-  if running:
-    result += '-'
+      shelf[uname] = obj
 
-  return result
+    return uname
 
-def safe_filename(name):
-  """
-  Encodes the given target name safely as a filesystem name.
-  """
-  return slug(name) + '_' + base64.urlsafe_b64encode(
-    bytes(name, encoding=FILENAME_ENCODING)
-  ).decode(encoding=FILENAME_ENCODING)
-
-def file_basename(cache_dir, target_name):
-  """
-  Converts a target name to the name of the file it'll be stored under.
-  """
-  return os.path.join(cache_dir, safe_filename(target_name))
-
-def save_model(cache_dir, model, model_name):
+def save_model(cache_file, model, model_name):
   """
   Saves the given model to disk for retrieval using load_model.
   """
-  model.save(file_basename(cache_dir, model_name) + ".h5")
+  with tempfile.TemporaryDirectory() as tmpdir:
+    fn = os.path.join(tmpdir, "model.h5")
+    model.save(fn)
+    with open(fn, 'rb') as fin:
+      modelbytes = fin.read()
 
-def load_model(cache_dir, model_name):
+  with shelve.open(cache_file) as shelf:
+    shelf["model:" + model_name] = (now(), modelbytes)
+    shelf.sync()
+
+def load_model(cache_file, model_name):
   """
-  Loads the given model from disk. Raises a ValueError if the target doesn't
-  exist. Returns a (timestamp, value) pair.
+  Loads the given model from the cache. Raises a ValueError if the target
+  doesn't exist. Returns a (timestamp, value) pair.
   """
   import keras
-  fn = file_basename(cache_dir, model_name) + ".h5"
-  if os.path.exists(fn):
-    ts = os.path.getmtime(fn)
-    return (ts, keras.models.load_model(fn))
-  else:
-    raise ValueError(
-      "Model '{}' isn't stored in directory '{}'.".format(
-        model_name,
-        cache_dir
+  with shelve.open(cache_file) as shelf:
+    mk = "model:" + model_name
+    if mk in shelf:
+      ts, modelbytes = shelf[mk]
+      with tempfile.TemporaryDirectory() as tmpdir:
+        fn = os.path.join(tmpdir, "model.h5")
+        with open(fn, 'wb') as fout:
+          fout.write(modelbytes)
+
+        loaded = keras.models.load_model(fn)
+
+      return (ts, loaded)
+    else:
+      raise ValueError(
+        "Model '{}' isn't stored in cache '{}'.".format(
+          model_name,
+          cache_file
+        )
       )
-    )
 
-
-def save_object(cache_dir, obj, name):
+def save_object(cache_file, obj, name):
   """
   Uses pickle to save the given object to a file.
   """
-  fn = file_basename(cache_dir, name) + ".pkl"
-  with open(fn, 'wb') as fout:
+  ok = "obj:" + name
+  with shelve.open(cache_file) as shelf:
     try:
-      pickle.dump(obj, fout)
+      shelf[ok] = (now(), obj)
     except:
       raise ValueError("Failed to pickle result for: '{}'".format(name))
 
-def load_object(cache_dir, name):
+def load_object(cache_file, name):
   """
   Uses pickle to load the given object from a file. If the file doesn't exist,
   raises a ValueError. Returns a (timestamp, value) pair.
   """
-  fn = file_basename(cache_dir, name) + ".pkl"
-  if os.path.exists(fn):
-    ts = os.path.getmtime(fn)
-    with open(fn, 'rb') as fin:
-      return (ts, pickle.load(fin))
-  else:
-    raise ValueError(
-      "Object '{}' isn't stored in directory '{}'.".format(
-        name,
-        cache_dir
+  ok = "obj:" + name
+  with shelve.open(cache_file) as shelf:
+    if ok in shelf:
+      return shelf[ok]
+    else:
+      raise ValueError(
+        "Object '{}' isn't stored in cache '{}'.".format(
+          name,
+          cache_file
+        )
       )
-    )
 
-def save_any(cache_dir, obj, name):
+def save_any(cache_file, obj, name):
   """
   Selects save_object or save_model automatically.
   """
   if "keras" in sys.modules:
     keras = sys.modules["keras"]
     if isinstance(obj, (keras.models.Sequential, keras.models.Model)):
-      save_model(cache_dir, obj, name)
+      save_model(cache_file, obj, name)
     else:
-      save_object(cache_dir, obj, name)
+      save_object(cache_file, obj, name)
   else:
-    save_object(cache_dir, obj, name)
+    save_object(cache_file, obj, name)
 
-def load_any(cache_dir, name):
+def load_any(cache_file, name):
   """
   Attempts load_object and falls back to load_model.
   """
   try:
-    return load_object(cache_dir, name)
+    return load_object(cache_file, name)
   except Exception as e:
     if "keras" in sys.modules:
-      return load_model(cache_dir, name)
+      return load_model(cache_file, name)
     else:
       raise e
 
-def check_time(cache_dir, name):
+def check_time(cache_file, name):
   """
   Returns just the modification time for the given object (tries pickle first
   and then h5). Returns None if the file does not exist.
   """
-  bfn = file_basename(cache_dir, name)
-  fn = bfn + ".pkl"
-  if os.path.exists(fn):
-    return os.path.getmtime(fn)
-  else:
-    fn = bfn + ".h5"
-    if os.path.exists(fn):
-      return os.path.getmtime(fn)
+  with shelve.open(cache_file) as shelf:
+    key = "obj:" + name
+    mkey = "model:" + name
+    if key in shelf:
+      return shelf[key][0]
+    elif mkey in shelf:
+      return shelf[mkey][0]
     else:
       return None
