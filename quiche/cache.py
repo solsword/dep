@@ -28,7 +28,6 @@ def save_model(cache_file, model, model_name):
       modelbytes = fin.read()
 
   with shelve.open(cache_file) as shelf:
-    print("SAVEMODEL")
     shelf["model:" + model_name] = (now(), modelbytes)
     shelf.sync()
 
@@ -43,7 +42,6 @@ def load_model(cache_file, model_name):
       "Cache '{}' does not exist.".format(cache_file)
     )
   with shelve.open(cache_file) as shelf:
-    print("LOADMODEL")
     mk = "model:" + model_name
     if mk in shelf:
       ts, modelbytes = shelf[mk]
@@ -69,7 +67,6 @@ def save_object(cache_file, obj, name):
   """
   ok = "obj:" + name
   with shelve.open(cache_file) as shelf:
-    print("SAVEOBJECT")
     try:
       shelf[ok] = (now(), obj)
     except:
@@ -86,7 +83,6 @@ def load_object(cache_file, name):
       "Cache '{}' does not exist.".format(cache_file)
     )
   with shelve.open(cache_file) as shelf:
-    print("LOADOBJECT")
     if ok in shelf:
       return shelf[ok]
     else:
@@ -131,7 +127,6 @@ def check_time(cache_file, name):
   if not os.path.exists(cache_file):
     return None
   with shelve.open(cache_file) as shelf:
-    print("CHECKTIME")
     key = "obj:" + name
     mkey = "model:" + name
     if key in shelf:
