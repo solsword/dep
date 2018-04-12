@@ -429,10 +429,17 @@ def gather_relevant_parameters(target):
   rv = list(relevant)
   for inp in inputs:
     for param in gather_relevant_parameters(inp):
-      for i in range(len(rv)):
-        if param < rv[i]:
+      where = len(rv)
+      for i, p in enumerate(rv):
+        if param < p:
+          where = i
           break
-      rv.insert(i, param)
+        elif param == p:
+          where = -1 # don't insert (already present)
+          break
+
+      if where >= 0:
+        rv.insert(where, param)
 
   return rv
 
@@ -464,7 +471,7 @@ def check_up_to_date(target, params={}, knockout=()):
       if val is NotAvailable:
         raise ValueError("Couldn't create dependency '{}'.".format(inp))
       ivalues.append(val)
-    pvalues = { pn: params.get(pn, None) for pn in pnames }
+    pvalues = { pn: params[pn] for pn in pnames if pn in params }
     value = function(*ivalues, **pvalues)
     return cache_value(target, all_relevant, params, value, flags)
   else:

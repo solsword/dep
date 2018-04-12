@@ -28,16 +28,22 @@ def save_model(cache_file, model, model_name):
       modelbytes = fin.read()
 
   with shelve.open(cache_file) as shelf:
+    print("SAVEMODEL")
     shelf["model:" + model_name] = (now(), modelbytes)
     shelf.sync()
 
 def load_model(cache_file, model_name):
   """
-  Loads the given model from the cache. Raises a ValueError if the target
-  doesn't exist. Returns a (timestamp, value) pair.
+  Loads the given model from the cache. Raises a ValueError if the target (or
+  cache) doesn't exist. Returns a (timestamp, value) pair.
   """
   import keras
+  if not os.path.exists(cache_file):
+    raise ValueError(
+      "Cache '{}' does not exist.".format(cache_file)
+    )
   with shelve.open(cache_file) as shelf:
+    print("LOADMODEL")
     mk = "model:" + model_name
     if mk in shelf:
       ts, modelbytes = shelf[mk]
@@ -63,6 +69,7 @@ def save_object(cache_file, obj, name):
   """
   ok = "obj:" + name
   with shelve.open(cache_file) as shelf:
+    print("SAVEOBJECT")
     try:
       shelf[ok] = (now(), obj)
     except:
@@ -70,11 +77,16 @@ def save_object(cache_file, obj, name):
 
 def load_object(cache_file, name):
   """
-  Uses pickle to load the given object from a file. If the file doesn't exist,
-  raises a ValueError. Returns a (timestamp, value) pair.
+  Load the named object from the given cache. If the object (or the cache)
+  doesn't exist, raises a ValueError. Returns a (timestamp, value) pair.
   """
   ok = "obj:" + name
+  if not os.path.exists(cache_file):
+    raise ValueError(
+      "Cache '{}' does not exist.".format(cache_file)
+    )
   with shelve.open(cache_file) as shelf:
+    print("LOADOBJECT")
     if ok in shelf:
       return shelf[ok]
     else:
@@ -112,10 +124,14 @@ def load_any(cache_file, name):
 
 def check_time(cache_file, name):
   """
-  Returns just the modification time for the given object (tries pickle first
-  and then h5). Returns None if the file does not exist.
+  Returns just the modification time for the named object (tries obj: first
+  and then model:). Returns None if the object does not exist. Does not create
+  a shelf if there isn't already a shelf at the given location.
   """
+  if not os.path.exists(cache_file):
+    return None
   with shelve.open(cache_file) as shelf:
+    print("CHECKTIME")
     key = "obj:" + name
     mkey = "model:" + name
     if key in shelf:
