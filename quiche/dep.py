@@ -337,7 +337,7 @@ def find_target(target):
     # try to find a generator that can handle it?
     for tre in TARGET_GENERATORS:
       m = re.match(tre, target)
-      if m:
+      if m and m.end() == len(target):
         gen, stuff = TARGET_GENERATORS[tre]
         try:
           return gen(m, stuff)
@@ -443,7 +443,7 @@ def gather_relevant_parameters(target):
 
   return rv
 
-def check_up_to_date(target, params={}, knockout=()):
+def check_up_to_date(target, params={}, knockout=(), announce=False):
   """
   Returns a timestamp for the given target after checking that all of its
   (recursive) perquisites are up-to-date. If missing and/or out-of-date values
@@ -451,20 +451,41 @@ def check_up_to_date(target, params={}, knockout=()):
 
   If given, targets in the knockout list (or set) will be considered stale even
   if timestamps indicate that they're up-to-date.
+
+  If announce is set to True, target names will be printed as they're
+  constructed; if the announce value has a 'write' method, that will be used
+  instead of printing to stdout.
   """
   inputs, pnames, function, flags = find_target(target)
 
-  all_relevant = gather_relevant_parameters(target)
-
-  times = [ check_up_to_date(inp, params, knockout) for inp in inputs ]
+  # Recurse on all inputs:
+  times = [
+    check_up_to_date(inp, params, knockout, announce)
+      for inp in inputs
+  ]
   subparams = [ gather_relevant_parameters(inp) for inp in inputs ]
+
+  # Decide how to announce things:
+  if announce:
+    if hasattr(announce, "write"):
+      announce = announce.write
+    else:
+      announce = lambda s: print(s, end="")
+
+  # Find relevant parameters here:
+  all_relevant = gather_relevant_parameters(target)
 
   if target in knockout:
     myts = None # explicit rebuild
   else:
     myts = get_cache_time(target, all_relevant, params)
+
+  # Check timestamps vs. dependencies & rebuild if stale:
   if myts is None or any(ts > myts for ts in times):
     # Compute and cache a new value:
+    if announce:
+      announce("Creating target '{}'...\n".format(target))
+
     ivalues = []
     for relevant, inp in zip(subparams, inputs):
       ts, val = get_cached(inp, relevant, params)
@@ -472,13 +493,30 @@ def check_up_to_date(target, params={}, knockout=()):
         raise ValueError("Couldn't create dependency '{}'.".format(inp))
       ivalues.append(val)
     pvalues = { pn: params[pn] for pn in pnames if pn in params }
+    if announce:
+      announce(
+        "  ...using parameters:\n{}\n...\n".format(
+          '\n'.join("    {}={}".format(k, pvalues[k]) for k in pvalues)
+        )
+      )
     value = function(*ivalues, **pvalues)
-    return cache_value(target, all_relevant, params, value, flags)
+    ts = cache_value(target, all_relevant, params, value, flags)
+    if announce:
+      announce("  ...done creating target '{}'.\n".format(target))
+    return ts
   else:
     # Just return time cached:
+    if announce:
+      pvalues = { pn: params[pn] for pn in pnames if pn in params }
+      announce(
+        "Found cached target '{}' [{}].\n".format(
+          target,
+          ", ".join("{}={}".format(k, pvalues[k]) for k in pvalues)
+        )
+      )
     return myts
 
-def create(target, params={}, knockout=()):
+def create(target, params={}, knockout=(), announce=False):
   """
   Creates the desired target, using cached values when appropriate. Passes
   parameters and the knockout list to check_up_to_date. Returns a (timestamp,
@@ -491,7 +529,7 @@ def create(target, params={}, knockout=()):
   recursively).
   """
   # Update dependencies as necessary (recursively)
-  check_up_to_date(target, params, knockout)
+  check_up_to_date(target, params, knockout, announce)
 
   # Grab newly-cached value:
   ts, val = get_cached(target, gather_relevant_parameters(target), params)
@@ -502,7 +540,7 @@ def create(target, params={}, knockout=()):
 
   return (ts, val)
 
-def create_brave(target, params={}, knockout=()):
+def create_brave(target, params={}, knockout=(), announce=False):
   """
   Creates the desired target, using the cache without question if a cached
   value is available. Only use this when you're fine with an out-of-date cached
@@ -513,7 +551,7 @@ def create_brave(target, params={}, knockout=()):
   ts, val = get_cached(target, gather_relevant_parameters(target), params)
 
   if val is NotAvailable: # Fine, we'll do a full dependency check
-    ts, val = create(target, params, knockout)
+    ts, val = create(target, params, knockout, announce)
 
   # If that failed, we're out of luck
   if val is NotAvailable:

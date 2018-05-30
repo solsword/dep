@@ -5,6 +5,8 @@ unit.py
 Quiche unit tests (pretty minimal so far).
 """
 
+import traceback
+
 try:
   from . import dep
 except:
@@ -39,6 +41,7 @@ def main():
     try:
      success = t()
     except:
+      traceback.print_exc()
       success = False
 
     if not success:
